@@ -7,6 +7,14 @@ const { chromium } = require('playwright');
 const USERNAME = "zhuzhuzhuzhu";
 const PASSWORD = "CHAOfan0920";
 
+// --- 可配置的抓取参数 ---
+const QUICK_TEST_MODE = true;  // 快速测试模式：true表示只抓10个，false表示按MAX_PAGES抓取
+const QUICK_TEST_LIMIT = 10;   // 快速测试模式下的抓取数量
+const MAX_PAGES = 3;           // 最大翻页数 (在快速模式关闭时生效)
+const EXCLUDED_FORUMS = [      // 在这里添加不希望抓取的板块链接
+    "forum-7.htm"  // 例如: 互助区
+];
+
 // --- HTML / CSS / JavaScript 前端代码 ---
 // 这部分和之前一模一样，我们只是把它从 Python 的世界搬到了 JavaScript 的怀抱里
 const HTML_CONTENT = `
@@ -142,7 +150,6 @@ let browserContext = null;
 async function scrapeHifini(page, keyword) {
     const allMusicData = [];
     const processedUrls = new Set();
-    const MAX_PAGES = 3; // 和Python脚本保持一致，最多翻3页
 
     // 步骤 1: 登录 (如果需要)
     try {
@@ -181,22 +188,28 @@ async function scrapeHifini(page, keyword) {
     // 步骤 3: 循环翻页并采集帖子链接
     let currentPage = 1;
     const collectedLinks = [];
+    const pageLimit = QUICK_TEST_MODE ? 100 : MAX_PAGES; // 如果是快速模式，理论上翻很多页直到找满10个
 
-    while (currentPage <= MAX_PAGES) {
+    while (currentPage <= pageLimit) {
         console.log(`--- 开始处理第 ${currentPage} 页 ---`);
         await page.waitForLoadState("networkidle");
 
         const threadElements = await page.locator("li.media.thread").all();
         console.log(`在第 ${currentPage} 页找到 ${threadElements.length} 个帖子，开始过滤...`);
 
+        let limitReached = false;
         for (const item of threadElements) {
-            const isHelpPost = await item.locator("a[href='forum-7.htm']").count() > 0;
-            if (isHelpPost) {
-                const titleElement = await item.locator("div.subject.break-all > a").first();
-                const title = await titleElement.innerText();
-                console.log(`  - [跳过] 发现互助帖: ${title.trim()}`);
-                continue;
+            let excluded = false;
+            for (const forumHref of EXCLUDED_FORUMS) {
+                if (await item.locator(`a[href='${forumHref}']`).count() > 0) {
+                    const titleElement = await item.locator("div.subject.break-all > a").first();
+                    const title = await titleElement.innerText();
+                    console.log(`  - [跳过] 发现被排除板块的帖子: ${title.trim()}`);
+                    excluded = true;
+                    break;
+                }
             }
+            if (excluded) continue;
 
             const linkElement = await item.locator("div.subject.break-all > a").first();
             if (linkElement) {
@@ -208,10 +221,17 @@ async function scrapeHifini(page, keyword) {
                         collectedLinks.push({ title: title, post_url: fullUrl });
                         processedUrls.add(fullUrl);
                         console.log(`  + [收录] ${title}`);
+                        if (QUICK_TEST_MODE && collectedLinks.length >= QUICK_TEST_LIMIT) {
+                            console.log(`\n快速测试模式已启动，并达到 ${QUICK_TEST_LIMIT} 个链接的抓取上限，停止采集。`);
+                            limitReached = true;
+                            break;
+                        }
                     }
                 }
             }
         }
+
+        if (limitReached) break;
 
         const nextPageButton = page.locator("a.page-link:has-text('▶')");
         if (await nextPageButton.count() > 0) {
