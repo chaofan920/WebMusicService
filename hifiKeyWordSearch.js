@@ -141,16 +141,20 @@ let browserContext = null;
 
 async function scrapeHifini(page, keyword) {
     const allMusicData = [];
-    
+    const processedUrls = new Set();
+    const MAX_PAGES = 3; // 和Python脚本保持一致，最多翻3页
+
     // 步骤 1: 登录 (如果需要)
     try {
-        // 增加超时时间到30秒，并等待DOM加载完成即可
+        console.log("检查登录状态...");
         await page.goto("https://hifiti.com/", { timeout: 30000, waitUntil: 'domcontentloaded' });
         const loginButton = page.locator('a[href*="user-login.htm"]');
         if (await loginButton.count() > 0) {
             console.log("尚未登录，现在开始执行登录流程...");
             await page.goto("https://hifiti.com/user-login.htm", { timeout: 20000, waitUntil: 'domcontentloaded' });
-            await page.getByPlaceholder("请输入用户名").fill(USERNAME);
+            const usernameInput = page.getByPlaceholder("请输入用户名");
+            await usernameInput.waitFor({ state: 'visible', timeout: 30000 });
+            await usernameInput.fill(USERNAME);
             await page.getByPlaceholder("请输入密码").fill(PASSWORD);
             await page.getByRole("button", { name: "登录" }).click();
             await page.waitForURL("https://hifiti.com/", { timeout: 20000 });
@@ -174,46 +178,84 @@ async function scrapeHifini(page, keyword) {
         throw new Error(`搜索失败: ${e.message}`);
     }
 
-    // 步骤 3: 采集帖子链接
-    const songLinksLocators = page.locator('a.subject.break-all');
-    const count = await songLinksLocators.count();
-    if (count === 0) return [];
-    
-    const songsToProcess = [];
-    const maxSongs = Math.min(count, 10); // 同样只处理前10个，避免等待太久
-    console.log(`找到了 ${count} 个帖子，将处理前 ${maxSongs} 个...`);
-    for (let i = 0; i < maxSongs; i++) {
-        const locator = songLinksLocators.nth(i);
-        const title = await locator.innerText();
-        const href = await locator.getAttribute("href");
-        if (href) {
-            const fullUrl = `https://hifiti.com/${href}`;
-            songsToProcess.push({ title: title.trim(), post_url: fullUrl });
+    // 步骤 3: 循环翻页并采集帖子链接
+    let currentPage = 1;
+    const collectedLinks = [];
+
+    while (currentPage <= MAX_PAGES) {
+        console.log(`--- 开始处理第 ${currentPage} 页 ---`);
+        await page.waitForLoadState("networkidle");
+
+        const threadElements = await page.locator("li.media.thread").all();
+        console.log(`在第 ${currentPage} 页找到 ${threadElements.length} 个帖子，开始过滤...`);
+
+        for (const item of threadElements) {
+            const isHelpPost = await item.locator("a[href='forum-7.htm']").count() > 0;
+            if (isHelpPost) {
+                const titleElement = await item.locator("div.subject.break-all > a").first();
+                const title = await titleElement.innerText();
+                console.log(`  - [跳过] 发现互助帖: ${title.trim()}`);
+                continue;
+            }
+
+            const linkElement = await item.locator("div.subject.break-all > a").first();
+            if (linkElement) {
+                const title = (await linkElement.innerText()).trim();
+                const href = await linkElement.getAttribute("href");
+                if (href) {
+                    const fullUrl = `https://hifiti.com/${href}`;
+                    if (!processedUrls.has(fullUrl)) {
+                        collectedLinks.push({ title: title, post_url: fullUrl });
+                        processedUrls.add(fullUrl);
+                        console.log(`  + [收录] ${title}`);
+                    }
+                }
+            }
+        }
+
+        const nextPageButton = page.locator("a.page-link:has-text('▶')");
+        if (await nextPageButton.count() > 0) {
+            console.log("找到'下一页'按钮，准备翻页...");
+            await nextPageButton.click();
+            currentPage++;
+            await page.waitForLoadState("networkidle", { timeout: 30000 });
+        } else {
+            console.log("未找到'下一页'按钮，抓取结束。");
+            break;
         }
     }
+    
+    console.log(`\n总共收集到 ${collectedLinks.length} 个有效帖子链接，准备抓取下载地址...`);
 
     // 步骤 4 & 5: 进入帖子抓取媒体链接
-    for (const [index, songInfo] of songsToProcess.entries()) {
-        console.log(`--- 处理第 ${index + 1}/${songsToProcess.length} 首：${songInfo.title} ---`);
+    for (const [index, songInfo] of collectedLinks.entries()) {
+        console.log(`--- 处理第 ${index + 1}/${collectedLinks.length} 首：${songInfo.title} ---`);
         let requestListener = null;
         try {
             const mediaUrlPromise = new Promise((resolve, reject) => {
+                const timer = setTimeout(() => {
+                    page.removeListener('request', requestListener);
+                    reject(new Error('超时未抓取到媒体链接'));
+                }, 20000);
+
                 requestListener = (request) => {
                     const url = request.url();
-                    if (url.match(/\.(mp3|flac)(\?.*)?$/)) {
+                    if (url.match(/\.(mp3|flac|wav)(\?.*)?$/i) || request.resourceType() === 'media') {
                         console.log(`🎶 抓取成功 -> ${url}`);
+                        clearTimeout(timer);
+                        page.removeListener('request', requestListener);
                         resolve(url);
                     }
                 };
                 page.on('request', requestListener);
-                // 设置一个20秒的超时定时器
-                setTimeout(() => reject(new Error('超时未抓取到媒体链接')), 20000);
             });
 
-            await page.goto(songInfo.post_url, { waitUntil: "domcontentloaded", timeout: 20000 });
-            const playButton = page.locator("div.aplayer-button.aplayer-play");
-            await playButton.waitFor({ timeout: 15000 });
-            await playButton.click();
+            await page.goto(songInfo.post_url, { waitUntil: "domcontentloaded", timeout: 60000 });
+            
+            const playButton = page.locator(".aplayer-button, .aplayer-dplayer").first();
+            if (await playButton.isVisible()) {
+                await playButton.click({ timeout: 5000 }).catch(() => console.log("点击播放按钮失败，但可能已触发请求。"));
+            }
 
             const finalUrl = await mediaUrlPromise;
             allMusicData.push({ title: songInfo.title, url: finalUrl });
@@ -221,7 +263,6 @@ async function scrapeHifini(page, keyword) {
         } catch (e) {
             console.error(`❌ 处理帖子 ${songInfo.post_url} 时出错: ${e.message}`);
         } finally {
-            // 处理完一个页面，一定要把监听器移除，避免干扰下一个
             if (requestListener) {
                 page.removeListener('request', requestListener);
             }
