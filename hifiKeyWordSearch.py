@@ -32,7 +32,7 @@ def run():
 
         # Step 3: Collect all result links
         post_links = page.eval_on_selector_all(
-            "a[href^='/thread-']",
+            "div.subject.break-all > a",
             "els => els.map(el => ({ title: el.innerText, href: el.href }))"
         )
 
