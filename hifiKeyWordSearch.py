@@ -1,14 +1,18 @@
 import time
 import json
+import sys
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 USERNAME = "zhuzhuzhuzhu"
 PASSWORD = "CHAOfan0920"
-SEARCH_KEYWORD = "周杰伦"
+if len(sys.argv) > 1:
+    SEARCH_KEYWORD = sys.argv[1]
+else:
+    SEARCH_KEYWORD = input("请输入您要搜索的关键词: ")
 BASE_URL = "https://hifiti.com"
 MAX_PAGES = 3  # 设置最大翻页数
 QUICK_TEST_MODE = True  # 快速测试模式：True表示只抓10个，False表示按MAX_PAGES抓取
-QUICK_TEST_LIMIT = 10   # 快速测试模式下的抓取数量
+QUICK_TEST_LIMIT = 5   # 快速测试模式下的抓取数量
 
 # 在这里添加不希望抓取的板块链接，例如 'forum-7.htm' 是互助区
 EXCLUDED_FORUMS = [
