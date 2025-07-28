@@ -89,12 +89,14 @@ async def search_hifini(keyword: str, quick_mode: bool, limit: int, max_pages: i
             for link_info in collected_links:
                 try:
                     await page.goto(link_info['post_url'], timeout=60000, wait_until="domcontentloaded")
-                    with page.expect_response(lambda r: r.request.resource_type == "media" or ".mp3" in r.url or ".flac" in r.url, timeout=20000) as response_info:
+                    with page.expect_response(lambda r: r.request.resource_type == "media" or ".mp3" in r.url or ".flac" in r.url, timeout=45000) as response_info:
                         play_button = page.locator(".aplayer-button, .aplayer-dplayer").first
                         if await play_button.is_visible():
                             await play_button.click(timeout=5000)
                     media_response = await response_info.value
                     results.append({"title": link_info['title'], "url": media_response.url})
+                except PlaywrightTimeoutError:
+                    print(f"Timeout (45s) while waiting for media file on page: {link_info['title']}. Skipping.")
                 except Exception as e:
                     print(f"Could not fetch media URL for {link_info['title']}: {e}")
 
