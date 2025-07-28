@@ -106,6 +106,11 @@ async def search_hifini(keyword: str, quick_mode: bool, limit: int, max_pages: i
         return results
 
 # --- API Endpoint Definition ---
+@app.get("/")
+def read_root():
+    return {"status": "ok"}
+
+
 @app.get("/api/search", response_model=List[Dict])
 async def search_endpoint(keyword: str, quick: bool = False, limit: int = 10, pages: int = 3, exclude: str = 'forum-7.htm'):
     """
