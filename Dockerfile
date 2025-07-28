@@ -6,28 +6,7 @@ WORKDIR /app
 
 # Install system dependencies required by Playwright's browsers.
 # This is the key step to fix the build failure.
-RUN apt-get update && apt-get install -y \
-    libnss3 \
-    libnspr4 \
-    libdbus-glib-1-2 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdrm2 \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxfixes3 \
-    libxrandr2 \
-    libgbm1 \
-    libpango-1.0-0 \
-    libcairo2 \
-    libasound2 \
-    libxshmfence1 \
-    libfontconfig1 \
-    libxkbcommon0 \
-    --no-install-recommends && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y     libnss3     libnspr4     libdbus-glib-1-2     libatk1.0-0     libatk-bridge2.0-0     libcups2     libdrm2     libx11-xcb1     libxcomposite1     libxdamage1     libxfixes3     libxrandr2     libgbm1     libpango-1.0-0     libcairo2     libasound2     libxshmfence1     libfontconfig1     libxkbcommon0     # Added libraries from the error log    libxcursor1     libgtk-3-0     libgdk-pixbuf2.0-0     libpangocairo-1.0-0     libcairo-gobject2     --no-install-recommends &&     rm -rf /var/lib/apt/lists/*
 
 # Copy the requirements file first to leverage Docker cache
 COPY requirements.txt .
