@@ -45,29 +45,215 @@
 
 ---
 
-## 4. 安卓客户端开发 (Android)
+## 4. 安卓客户端开发详解 (Android Client Blueprint)
 
-安卓客户端是用户直接交互的界面，它的核心是提供优秀的用户体验。
+安卓客户端是用户直接交互的界面。以下是构建该 App 的核心思路与关键代码，使用 Google 推荐的现代化技术栈。
 
-- **技术栈:**
-  - **Kotlin**: Google 官方推荐的安卓开发语言。
-  - **Jetpack Compose**: 用于构建原生 UI 的现代化声明式框架。
-  - **Retrofit**: 一个强大的类型安全的 HTTP 客户端，用于与我们的后端 API 进行通信。
-  - **ExoPlayer**: 一个由 Google 开发的、功能强大且可扩展的开源媒体播放库，用于播放在线音乐。
+- **技术栈总览:**
+  - **语言**: Kotlin
+  - **UI 框架**: Jetpack Compose
+  - **网络请求**: Retrofit
+  - **JSON 解析**: Kotlinx Serialization
+  - **音乐播放**: ExoPlayer
+  - **架构**: MVVM (Model-View-ViewModel)
 
-- **核心任务:**
-  1. **UI 设计**:
-     - 一个包含搜索框和搜索按钮的主界面。
-     - 一个用于展示搜索结果的列表（使用 `LazyColumn`)。
-     - 一个简洁的底部播放控制条。
-  2. **网络请求**:
-     - 使用 Retrofit 定义一个服务接口，用于调用后端部署好的 `/api/search` API。
-  3. **数据处理**:
-     - 创建一个数据类（`data class Song`）来匹配从后端接收的 JSON 结构。
-     - 使用序列化库（如 `kotlinx.serialization` 或 `Gson`）将 JSON 自动转换为 `Song` 对象列表。
-  4. **音乐播放**:
-     - 集成 ExoPlayer。
-     - 当用户点击结果列表中的某一项时，获取其 `url`，并交由 ExoPlayer 进行在线流式播放。
+### 第 1 步：项目设置 (build.gradle.kts)
+
+在 App 模块的 `build.gradle.kts` 文件中添加所有必要的库依赖：
+
+```kotlin
+// 在 build.gradle.kts 的 dependencies { ... } 代码块中添加
+
+// Retrofit for networking
+implementation("com.squareup.retrofit2:retrofit:2.9.0")
+
+// Kotlinx Serialization for JSON parsing
+implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.0")
+implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
+
+// ExoPlayer for media playback
+implementation("androidx.media3:media3-exoplayer:1.2.0")
+
+// Jetpack Compose dependencies (usually already there)
+implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
+```
+
+### 第 2 步：定义数据模型 (Song.kt)
+
+创建一个数据类来匹配 API 返回的 JSON 结构。
+
+```kotlin
+import kotlinx.serialization.Serializable
+
+@Serializable
+data class Song(
+    val title: String,
+    val url: String
+)
+```
+
+### 第 3 步：创建网络服务接口 (ApiService.kt)
+
+使用 Retrofit 定义一个接口，来描述如何与我们的后端 API 通信。
+
+```kotlin
+import retrofit2.http.GET
+import retrofit2.http.Query
+
+interface ApiService {
+
+    @GET("/api/search") // 对应 FastAPI 中的端点
+    suspend fun searchMusic(
+        @Query("keyword") keyword: String,
+        @Query("quick") quick: Boolean = false,
+        @Query("limit") limit: Int = 10,
+        @Query("pages") pages: Int = 3,
+        @Query("exclude") exclude: String = "forum-7.htm"
+    ): List<Song> // Retrofit 会自动将返回的 JSON 解析成 Song 列表
+}
+```
+
+### 第 4 步：创建 ViewModel 管理业务逻辑 (SearchViewModel.kt)
+
+ViewModel 是连接 UI 和数据（我们的 API）的桥梁。
+
+```kotlin
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import kotlinx.serialization.json.Json
+import okhttp3.MediaType.Companion.toMediaType
+
+class SearchViewModel : ViewModel() {
+
+    // 注意：在安卓模拟器中，要用 10.0.2.2 访问你电脑的 localhost
+    private val BASE_URL = "http://10.0.2.2:8000"
+
+    private val apiService: ApiService by lazy {
+        Retrofit.Builder()
+            .baseUrl(BASE_URL)
+            .addConverterFactory(Json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(ApiService::class.java)
+    }
+
+    private val _songs = MutableStateFlow<List<Song>>(emptyList())
+    val songs = _songs.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading = _isLoading.asStateFlow()
+
+    private val _errorMessage = MutableStateFlow<String?>(null)
+    val errorMessage = _errorMessage.asStateFlow()
+
+    fun search(keyword: String) {
+        if (keyword.isBlank()) return
+        viewModelScope.launch {
+            _isLoading.value = true
+            _errorMessage.value = null
+            try {
+                val results = apiService.searchMusic(keyword = keyword)
+                _songs.value = results
+            } catch (e: Exception) {
+                _errorMessage.value = "搜索失败: ${e.message}"
+                _songs.value = emptyList()
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+}
+```
+
+### 第 5 步：构建 UI 界面 (SearchScreen.kt)
+
+使用 Jetpack Compose 来构建用户界面。
+
+```kotlin
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+
+@Composable
+fun SearchScreen(searchViewModel: SearchViewModel = viewModel()) {
+    val songs by searchViewModel.songs.collectAsState()
+    val isLoading by searchViewModel.isLoading.collectAsState()
+    val errorMessage by searchViewModel.errorMessage.collectAsState()
+    var text by remember { mutableStateOf("") }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        // ... (搜索栏和按钮的代码)
+
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            if (isLoading) {
+                CircularProgressIndicator()
+            } else if (errorMessage != null) {
+                Text(text = errorMessage!!)
+            } else {
+                LazyColumn {
+                    items(songs) { song ->
+                        SongItem(song = song, onPlayClick = { /* TODO */ })
+                        Divider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SongItem(song: Song, onPlayClick: (Song) -> Unit) {
+    // ... (列表项 UI 的代码)
+}
+```
+
+### 第 6 步：集成播放器
+
+通过一个单例 `PlayerManager` 来管理 ExoPlayer 实例，并在 ViewModel 中调用它。
+
+```kotlin
+// PlayerManager.kt
+object PlayerManager {
+    private var exoPlayer: ExoPlayer? = null
+    fun getPlayer(context: Context): ExoPlayer {
+        if (exoPlayer == null) {
+            exoPlayer = ExoPlayer.Builder(context).build()
+        }
+        return exoPlayer!!
+    }
+    // ... (省略释放逻辑)
+}
+
+// 在 SearchViewModel.kt 中添加
+fun playSong(context: Context, song: Song) {
+    val player = PlayerManager.getPlayer(context)
+    val mediaItem = androidx.media3.common.MediaItem.fromUri(song.url)
+    player.setMediaItem(mediaItem)
+    player.prepare()
+    player.play()
+}
+```
+
+### 第 7 步：添加网络权限 (AndroidManifest.xml)
+
+在 `app/src/main/AndroidManifest.xml` 文件中声明应用需要网络权限。
+
+```xml
+<manifest ...>
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application ...> ... </application>
+</manifest>
+```
 
 ---
 
@@ -83,7 +269,7 @@
     - 完成搜索界面和结果列表的基本 UI 布局。
 
 3.  **第三步：前后端联调**:
-    - 在 App 中集成 Retrofit，并配置其指向本地运行的后端服务地址。
+    - 在 App 中集成 Retrofit，并配置其指向本地运行的后端服务地址 (`http://10.0.2.2:8000`)。
     - 实现 App 的搜索功能，确保可以成功获取数据并在列表中展示。
 
 4.  **第四步：播放功能实现**:

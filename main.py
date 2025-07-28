@@ -10,9 +10,15 @@ app = FastAPI(
     version="1.0.0",
 )
 
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 # --- Scraper Configuration ---
-USERNAME = "zhuzhuzhuzhu"
-PASSWORD = "CHAOfan0920"
+USERNAME = os.getenv("HIFINI_USERNAME")
+PASSWORD = os.getenv("HIFINI_PASSWORD")
 BASE_URL = "https://hifiti.com"
 
 # --- Core Scraping Logic (Async Version) ---
