@@ -41,7 +41,9 @@ RUN playwright install
 # Copy the rest of your application code into the container
 COPY . .
 
-# The Start Command in your Render settings will be used to run the app.
-# It should be: uvicorn main:app --host=0.0.0.0 --port=10000
-# Render injects the PORT variable, so you can use --port=${PORT} in the start command.
-CMD ["uvicorn", "main:app", "--host=0.0.0.0", "--port", "10000"]
+# Copy the start script and make it executable
+COPY start.sh .
+RUN chmod +x start.sh
+
+# The Start Command will be executed by this script
+CMD ["./start.sh"]
